@@ -19,101 +19,35 @@ peak_dat = read_xlsx(
 ) %>% 
   mutate(area_ht = TotalPeakArea1 / MajorHeightnA)
 
-# raw_datL = split(raw_dat, by = "DataFileName")
-
-raw_practice = peak_dat %>% 
-  filter(DataFileName == "98.raw")
-
-# Get the 13:0 identified
-
-thirteen = raw_practice %>% 
-  filter(
-    MajorHeightnA >= 0.4 * max(MajorHeightnA) &
-      RetTimeSecs > 250
-  )
-min(thirteen$RetTimeSecs)
-
-# 16:0 
-
-sixteen = raw_practice %>% 
-  filter(
-    RetTimeSecs < 2100 & RetTimeSecs > 1900
-  )
-sixteen$RetTimeSecs[sixteen$MajorHeightnA==max(sixteen$MajorHeightnA)]
-
-# 15:0 ISO
-
-fifteenISO = raw_practice %>% 
-  filter(
-    RetTimeSecs > 1500 & MajorHeightnA >= 0.01 * max(MajorHeightnA)
-    # Ret Time is at least 1500 secs AND peak height is at least 1% of the max peak height 
-  )
-min(fifteenISO$RetTimeSecs)
-
-# Fifteen ANTE ISO
-
-fifteenANTE = raw_practice %>% 
-  filter(
-    RetTimeSecs > 1500 & MajorHeightnA >= 0.01 * max(MajorHeightnA)
-    # Ret Time is at least 1500 secs AND peak height is at least 1% of the max peak height 
-  ) %>% 
-  filter(
-    RetTimeSecs != min(.$RetTimeSecs)
-  )
-min(fifteenANTE$RetTimeSecs)
-
-# 15:0 (lil bb)
-
-fifteen = raw_practice %>% 
-  filter(
-    RetTimeSecs > 1600 & RetTimeSecs < 1750
-  )
-fifteen$RetTimeSecs[fifteen$area_ht==max(fifteen$area_ht)]
-
-# 16:1w9c
-
-sixteen_1w9c = raw_practice %>% 
-  filter(
-    RetTimeSecs > 1800 & MajorHeightnA >= 0.005 * max(MajorHeightnA)
-  )
-min(sixteen_1w9c$RetTimeSecs)
-
-# 16:1w7c
-
-sixteen_1w7c = raw_practice %>% 
-  filter(
-    RetTimeSecs > 1800 & MajorHeightnA >= 0.005 * max(MajorHeightnA)
-  ) %>% 
-  filter(
-    RetTimeSecs != min(sixteen_1w9c$RetTimeSecs)
-  )
-min(sixteen_1w7c$RetTimeSecs)
-
-# 16:1w5c
-
-sixteen_1w5c = raw_practice %>% 
-  filter(
-    RetTimeSecs > 1800 & MajorHeightnA >= 0.005 * max(MajorHeightnA)
-  ) %>% 
-  filter(
-    RetTimeSecs != min(sixteen_1w9c$RetTimeSecs) &
-    RetTimeSecs != min(sixteen_1w7c$RetTimeSecs) 
-      
-  )
-min(sixteen_1w5c$RetTimeSecs)
-
-
-
 # Set up loop that will name peaks across all spectra
 
 # First, create a list of data frames to loop over
 
 peak_datL = peak_dat %>% 
+  # Get rid of standards for loop
   filter(
     !str_detect(DataFileName, "M1M2") 
-    & !str_detect(DataFileName, "FAME")
+    & !str_detect(DataFileName, "FAME") &
+      !str_detect(DataFileName, "hexane") &
+      !str_detect(DataFileName, "B") &
+      !str_detect(DataFileName, "C") &
+      !str_detect(DataFileName, "13-0") &
+      !str_detect(DataFileName, "16-0")
   ) %>% 
+  droplevels() %>% 
   mutate(name = NA)
+
+# Get rid of first runs of samples that were rerun
+
+rerun_nums = peak_datL %>% filter(str_detect(DataFileName, "rerun")) %>% 
+  dplyr::select(DataFileName) %>% distinct() %>% 
+  mutate(DataFileName = 
+           paste0(str_match(DataFileName, "^[:digit:]+")[,1],
+                  ".raw"))
+  
+peak_datL = peak_datL %>% 
+  filter(!DataFileName %in% rerun_nums$DataFileName) %>% 
+  droplevels()
 
 peak_datL = split(
   peak_datL, 
@@ -139,6 +73,18 @@ for(i in names(peak_datL)){
     )
   fifteenISO_secs = min(fifteenISO$RetTimeSecs)
   peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == fifteenISO_secs] = "15:0 ISO"
+  
+  # 14:0 ISO (biggest between 13:0 and 15:0 ISO)
+  fourteen = peak_datL[[i]] %>% 
+    filter(
+      RetTimeSecs > thirteen_secs &
+        RetTimeSecs < fifteenISO_secs
+    ) %>% 
+    filter(
+      MajorHeightnA == max(.$MajorHeightnA)
+    )
+  fourteen_secs = fourteen$RetTimeSecs[1]
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == fourteen_secs] = "14:0"
   
   # Fifteen ANTE ISO
   fifteenANTE = peak_datL[[i]] %>% 
@@ -195,23 +141,140 @@ for(i in names(peak_datL)){
   sixteen_secs = sixteen$RetTimeSecs[sixteen$MajorHeightnA==max(sixteen$MajorHeightnA)]
   peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == sixteen_secs] = "16:0"
   
-  # 16:0 10me
+  # 16:0 10me - NOT always there
   sixteen_10me = peak_datL[[i]] %>% 
     filter(
-        MajorHeightnA > 0.2 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$name=="16:0"]
+      RetTimeSecs > sixteen_secs &
+        MajorHeightnA > 0.10 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == sixteen_secs]
     )
-  sixteen_10me_secs = min(sixteen_10me$RetTimeSecs)
+  sixteen_10me_secs = ifelse(
+    nrow(sixteen_10me) > 0,
+    min(sixteen_10me$RetTimeSecs),
+    NA)
+  if(!is.na(sixteen_10me_secs)){
   peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == sixteen_10me_secs] = "16:0 10me"
+  }
+  
+  # 17:0 ISO - always there, not always in the data :-(
+  seventeen_ISO = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > 
+      ifelse(is.na(sixteen_10me_secs), 
+             sixteen_secs,
+             sixteen_10me_secs) &
+        MajorHeightnA > 0.03 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == sixteen_secs]
+      )
+  seventeen_ISO_secs = min(seventeen_ISO$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == seventeen_ISO_secs] = "17:0 ISO"
+  
+  # 17:0 ANTE ISO - always there, not always in the data :-(
+  seventeenANTE_ISO = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > seventeen_ISO_secs &
+        MajorHeightnA > 0.03 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == sixteen_secs]
+    )
+  seventeenANTE_ISO_secs = min(seventeenANTE_ISO$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == seventeenANTE_ISO_secs] = "17:0 ANTE ISO"
+
+  # 17:0 CYCLO - always there
+  seventeen_cyclo = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > seventeenANTE_ISO_secs &
+        MajorHeightnA > 0.015 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == sixteen_secs]
+    )
+  seventeen_cyclo_secs = min(seventeen_cyclo$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == seventeen_cyclo_secs] = "17:0 cyclo"
+  
+  # 17:0 - always there
+  seventeen = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > seventeen_cyclo_secs &
+        MajorHeightnA > 0.015 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == sixteen_secs]
+    )
+  seventeen_secs = min(seventeen$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == seventeen_secs] = "17:0"
+  
+  # 18:1w9c - always there (big guy middle of triad)
+  eighteen_1w9c = peak_datL[[i]] %>% 
+    # get local maxima between 2600 and 2700 sec
+    filter(RetTimeSecs > 2600 & RetTimeSecs < 2750) %>% 
+    filter(MajorHeightnA == max(.$MajorHeightnA))
+  eighteen_1w9c_secs = eighteen_1w9c$RetTimeSecs[1]
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == eighteen_1w9c_secs] = "18:1w9c"
+  
+  # 18:2w69c - always there (just before 18:1w9c)
+  eighteen_2w69c = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs < eighteen_1w9c_secs
+    )
+  eighteen_2w69c_secs = max(eighteen_2w69c$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == eighteen_2w69c_secs] = "18:2w69c"
+  
+  # 18:1w9t - always there (just after 18:1w9c)
+  eighteen_1w9t = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > eighteen_1w9c_secs
+    )
+  eighteen_1w9t_secs = min(eighteen_1w9t$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == eighteen_1w9t_secs] = "18:1w9t"
+  
+  # 18:0 - always there (center of triad with 2 peaks that are not always there)
+  eighteen = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > eighteen_1w9t_secs &
+        MajorHeightnA > 0.3 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == eighteen_1w9c_secs]
+    )
+  eighteen_secs = min(eighteen$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == eighteen_secs] = "18:0"
+  
+  # 18:1w7c - not always there (lil guy between 18:1w9t and 18:0)
+  eighteen_1w7c = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs < eighteen_secs & 
+        RetTimeSecs > eighteen_1w9t_secs
+      )
+  eighteen_1w7c_secs = ifelse(
+    nrow(eighteen_1w7c) > 0,
+    max(eighteen_1w7c$RetTimeSecs),
+    NA)
+  if(!is.na(eighteen_1w7c_secs)){
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == eighteen_1w7c_secs] = "18:1w7c"
+  }
+  
+  # 18:0 10me - not always there, actually barely ever in the data
+  # (lil guy just after 18:0)
+  eighteen_10me = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > eighteen_secs & 
+        RetTimeSecs < eighteen_secs + 50
+    )
+  eighteen_10me_secs = ifelse(
+    nrow(eighteen_10me) > 0,
+    min(eighteen_10me$RetTimeSecs),
+    NA)
+  if(!is.na(eighteen_10me_secs)){
+    peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == eighteen_10me_secs] = "18:0 10me"
+  }
+  
+  # 19:0 - always there (big boy at the end)
+  nineteen = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs > ifelse(is.na(eighteen_10me_secs),
+                           eighteen_secs, eighteen_10me_secs) &
+        MajorHeightnA > 0.4 * peak_datL[[i]]$MajorHeightnA[peak_datL[[i]]$RetTimeSecs == thirteen_secs]
+    )
+  nineteen_secs = min(nineteen$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == nineteen_secs] = "19:0"
+  
+  # 19:0 cyclo - always there (lil guy right before 19:0)
+  nineteen_cyclo = peak_datL[[i]] %>% 
+    filter( 
+      RetTimeSecs < nineteen_secs
+        )
+  nineteen_cyclo_secs = max(nineteen_cyclo$RetTimeSecs)
+  peak_datL[[i]]$name[peak_datL[[i]]$RetTimeSecs == nineteen_cyclo_secs] = "19:0 cyclo"
+  
 }
 
 peak_dat2 = peak_datL %>% 
   bind_rows()
-
-# Notes from 5/16 ###
-# First tested 22_raw - 15:0 is at 1730.6 (from the loop) rather than 1678.9 (where it actually is)
-    # Then changed code to pick peak with largest area before 1700 - problem solved
-# 35_raw all points correct up to 16:0
-
-# Notes from 5/19 
-# Need to add if statements to deal with spectra that don't have all peaks
-# Need to figure out why 16:0 10me is not working
